@@ -31,13 +31,16 @@ const fmtBRL = v => `R$ ${parseFloat(v).toLocaleString("pt-BR",{minimumFractionD
 const today = () => new Date().toISOString().split("T")[0];
 const getDays = (y,m) => { const n=new Date(y,m+1,0).getDate(); return Array.from({length:n},(_,i)=>new Date(y,m,i+1).toISOString().split("T")[0]); };
 
+const PROXY = "/api/search";
+
 async function fetchDuffel(key,origin,dest,date,adults){
-  const r=await fetch("https://api.duffel.com/air/offer_requests",{
+  const r=await fetch(PROXY,{
     method:"POST",
-    headers:{"Content-Type":"application/json","Duffel-Version":"v2","Authorization":`Bearer ${key}`},
-    body:JSON.stringify({data:{slices:[{origin,destination:dest,departure_date:date}],passengers:Array(adults).fill({type:"adult"}),cabin_class:"economy"}})
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({provider:"duffel",duffelKey:key,origin,dest,date,adults})
   });
   const d=await r.json();
+  if(d.error) throw new Error("Duffel: "+d.error);
   if(d.errors) throw new Error("Duffel: "+d.errors[0]?.message);
   return (d.data?.offers||[]).slice(0,10).map(o=>({
     source:"Duffel",id:"df-"+o.id,
@@ -53,23 +56,13 @@ async function fetchDuffel(key,origin,dest,date,adults){
 }
 
 async function fetchSkyScrapper(key,origin,dest,date,adults){
-  const headers={
-    "x-rapidapi-key":key,
-    "x-rapidapi-host":"sky-scrapper.p.rapidapi.com",
-  };
-  const [oRes,dRes]=await Promise.all([
-    fetch(`https://sky-scrapper.p.rapidapi.com/api/v1/flights/searchAirport?query=${origin}&locale=en-US`,{headers}),
-    fetch(`https://sky-scrapper.p.rapidapi.com/api/v1/flights/searchAirport?query=${dest}&locale=en-US`,{headers}),
-  ]);
-  const [oD,dD]=await Promise.all([oRes.json(),dRes.json()]);
-  const oAirport=oD.data?.find(a=>a.skyId===origin)||oD.data?.[0];
-  const dAirport=dD.data?.find(a=>a.skyId===dest)||dD.data?.[0];
-  if(!oAirport||!dAirport) throw new Error("SkyScrapper: aeroporto não encontrado");
-  const r=await fetch(
-    `https://sky-scrapper.p.rapidapi.com/api/v2/flights/searchFlights?originSkyId=${oAirport.skyId}&destinationSkyId=${dAirport.skyId}&originEntityId=${oAirport.entityId}&destinationEntityId=${dAirport.entityId}&date=${date}&adults=${adults}&currency=BRL&locale=en-US&market=BR&cabinClass=economy`,
-    {headers}
-  );
+  const r=await fetch(PROXY,{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({provider:"skyscrapper",ssKey:key,origin,dest,date,adults})
+  });
   const d=await r.json();
+  if(d.error) throw new Error("SkyScrapper: "+d.error);
   return (d.data?.itineraries||[]).slice(0,10).map((it,i)=>{
     const leg=it.legs?.[0];
     return {source:"SkyScrapper",id:"ss-"+i,
