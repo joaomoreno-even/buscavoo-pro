@@ -5,9 +5,8 @@ const airports = [
   {code:"GIG",name:"Rio de Janeiro (Galeão)"},{code:"SDU",name:"Rio de Janeiro (Santos Dumont)"},
   {code:"BSB",name:"Brasília"},{code:"SSA",name:"Salvador"},{code:"FOR",name:"Fortaleza"},
   {code:"REC",name:"Recife"},{code:"BEL",name:"Belém"},{code:"MAO",name:"Manaus"},
-  {code:"CWB",name:"Curitiba"},{code:"POA",name:"Porto Alegre"},  {code:"FLN",name:"Florianópolis"},
-  {code:"THE",name:"Teresina"},{code:"JPA",name:"João Pessoa (Paraíba)"},
-  {code:"LDB",name:"Londrina"},
+  {code:"CWB",name:"Curitiba"},{code:"POA",name:"Porto Alegre"},{code:"FLN",name:"Florianópolis"},
+  {code:"THE",name:"Teresina"},{code:"JPA",name:"João Pessoa (Paraíba)"},{code:"LDB",name:"Londrina"},
   {code:"MIA",name:"Miami"},{code:"JFK",name:"Nova York (JFK)"},{code:"LAX",name:"Los Angeles"},
   {code:"LIS",name:"Lisboa"},{code:"MAD",name:"Madrid"},{code:"LHR",name:"Londres"},
   {code:"CDG",name:"Paris"},{code:"FCO",name:"Roma"},{code:"MXP",name:"Milão"},
@@ -53,51 +52,39 @@ async function fetchDuffel(key,origin,dest,date,adults){
   }));
 }
 
-async function fetchKiwi(key,origin,dest,date,adults){
-  const r=await fetch(
-    `https://tequila-api.kiwi.com/v2/search?fly_from=${origin}&fly_to=${dest}&date_from=${date.split("-").reverse().join("/")}&date_to=${date.split("-").reverse().join("/")}&adults=${adults}&curr=BRL&limit=10`,
-    {headers:{"apikey":key}}
-  );
-  const d=await r.json();
-  if(d.error) throw new Error("Kiwi: "+d.error);
-  return (d.data||[]).map(o=>({
-    source:"Kiwi",id:"kw-"+o.id,
-    price:parseFloat(o.price),currency:"BRL",
-    airline:o.airlines?.[0]||"—",
-    stops:(o.route?.length||1)-1,
-    duration:`${Math.floor(o.duration?.departure/3600)}h ${Math.round((o.duration?.departure%3600)/60)}min`,
-    dep:new Date(o.dTime*1000).toISOString().slice(11,16),
-    arr:new Date(o.aTime*1000).toISOString().slice(11,16),
-    seats:o.availability?.seats||null,cabin:"ECONOMY",deeplink:o.deep_link||null,
-  }));
-}
-
 async function fetchSkyScrapper(key,origin,dest,date,adults){
+  const headers={
+    "x-rapidapi-key":key,
+    "x-rapidapi-host":"sky-scrapper.p.rapidapi.com",
+  };
   const [oRes,dRes]=await Promise.all([
-    fetch(`https://sky-scrapper.p.rapidapi.com/api/v1/flights/searchAirport?query=${origin}&locale=pt-BR`,{headers:{"x-rapidapi-key":key,"x-rapidapi-host":"sky-scrapper.p.rapidapi.com"}}),
-    fetch(`https://sky-scrapper.p.rapidapi.com/api/v1/flights/searchAirport?query=${dest}&locale=pt-BR`,{headers:{"x-rapidapi-key":key,"x-rapidapi-host":"sky-scrapper.p.rapidapi.com"}}),
+    fetch(`https://sky-scrapper.p.rapidapi.com/api/v1/flights/searchAirport?query=${origin}&locale=en-US`,{headers}),
+    fetch(`https://sky-scrapper.p.rapidapi.com/api/v1/flights/searchAirport?query=${dest}&locale=en-US`,{headers}),
   ]);
   const [oD,dD]=await Promise.all([oRes.json(),dRes.json()]);
-  const oId=oD.data?.[0]?.skyId,dId=dD.data?.[0]?.skyId;
-  const oEnt=oD.data?.[0]?.entityId,dEnt=dD.data?.[0]?.entityId;
-  if(!oId||!dId) throw new Error("SkyScrapper: aeroporto não encontrado");
+  const oAirport=oD.data?.find(a=>a.skyId===origin)||oD.data?.[0];
+  const dAirport=dD.data?.find(a=>a.skyId===dest)||dD.data?.[0];
+  if(!oAirport||!dAirport) throw new Error("SkyScrapper: aeroporto não encontrado");
   const r=await fetch(
-    `https://sky-scrapper.p.rapidapi.com/api/v2/flights/searchFlights?originSkyId=${oId}&destinationSkyId=${dId}&originEntityId=${oEnt}&destinationEntityId=${dEnt}&date=${date}&adults=${adults}&currency=BRL&locale=pt-BR&market=BR&cabinClass=economy`,
-    {headers:{"x-rapidapi-key":key,"x-rapidapi-host":"sky-scrapper.p.rapidapi.com"}}
+    `https://sky-scrapper.p.rapidapi.com/api/v2/flights/searchFlights?originSkyId=${oAirport.skyId}&destinationSkyId=${dAirport.skyId}&originEntityId=${oAirport.entityId}&destinationEntityId=${dAirport.entityId}&date=${date}&adults=${adults}&currency=BRL&locale=en-US&market=BR&cabinClass=economy`,
+    {headers}
   );
   const d=await r.json();
   return (d.data?.itineraries||[]).slice(0,10).map((it,i)=>{
     const leg=it.legs?.[0];
-    return {source:"SkyScrapper",id:"ss-"+i,price:parseFloat(it.price?.raw||0),currency:"BRL",
-      airline:leg?.carriers?.marketing?.[0]?.name||"—",stops:leg?.stopCount||0,
+    return {source:"SkyScrapper",id:"ss-"+i,
+      price:parseFloat(it.price?.raw||0),currency:"BRL",
+      airline:leg?.carriers?.marketing?.[0]?.name||"—",
+      stops:leg?.stopCount||0,
       duration:`${Math.floor((leg?.durationInMinutes||0)/60)}h ${(leg?.durationInMinutes||0)%60}min`,
-      dep:leg?.departure?.slice(11,16)||"—",arr:leg?.arrival?.slice(11,16)||"—",
+      dep:leg?.departure?.slice(11,16)||"—",
+      arr:leg?.arrival?.slice(11,16)||"—",
       seats:null,cabin:"ECONOMY",deeplink:null};
   });
 }
 
-const srcStyle={Duffel:"bg-violet-100 text-violet-700",Kiwi:"bg-orange-100 text-orange-700",SkyScrapper:"bg-teal-100 text-teal-700"};
-const srcIcon={Duffel:"🟣",Kiwi:"🥝",SkyScrapper:"🔭"};
+const srcStyle={Duffel:"bg-violet-100 text-violet-700",SkyScrapper:"bg-teal-100 text-teal-700"};
+const srcIcon={Duffel:"🟣",SkyScrapper:"🔭"};
 
 function FlightCard({f,isLowest}){
   return(
@@ -168,7 +155,7 @@ const TABS=[["search","🔍 Buscar"],["calendar","📅 Calendário"],["alerts","
 
 export default function App(){
   const [tab,setTab]=useState("config");
-  const [creds,setCreds]=useState({duffelKey:"",kiwiKey:"",ssKey:""});
+  const [creds,setCreds]=useState({duffelKey:"",ssKey:""});
   const [origin,setOrigin]=useState("GRU");
   const [dest,setDest]=useState("LIS");
   const [date,setDate]=useState(()=>{const d=new Date();d.setDate(d.getDate()+30);return d.toISOString().split("T")[0];});
@@ -191,7 +178,6 @@ export default function App(){
   const enabledApis=()=>{
     const a=[];
     if(creds.duffelKey) a.push("Duffel");
-    if(creds.kiwiKey) a.push("Kiwi");
     if(creds.ssKey) a.push("SkyScrapper");
     return a;
   };
@@ -203,7 +189,6 @@ export default function App(){
     const st={};apis.forEach(a=>st[a]="⏳ buscando...");setStatuses({...st});
     const runners=[
       apis.includes("Duffel")&&fetchDuffel(creds.duffelKey,origin,dest,date,adults).then(r=>{setStatuses(p=>({...p,Duffel:`✅ ${r.length} voos`}));return r;}).catch(e=>{setStatuses(p=>({...p,Duffel:`❌ ${e.message}`}));return[];}),
-      apis.includes("Kiwi")&&fetchKiwi(creds.kiwiKey,origin,dest,date,adults).then(r=>{setStatuses(p=>({...p,Kiwi:`✅ ${r.length} voos`}));return r;}).catch(e=>{setStatuses(p=>({...p,Kiwi:`❌ ${e.message}`}));return[];}),
       apis.includes("SkyScrapper")&&fetchSkyScrapper(creds.ssKey,origin,dest,date,adults).then(r=>{setStatuses(p=>({...p,SkyScrapper:`✅ ${r.length} voos`}));return r;}).catch(e=>{setStatuses(p=>({...p,SkyScrapper:`❌ ${e.message}`}));return[];}),
     ].filter(Boolean);
     const all=await Promise.all(runners);
@@ -221,8 +206,7 @@ export default function App(){
     const agg={};
     await Promise.all(dates.map(async d=>{
       const runners=[];
-      if(apis.includes("Duffel")) runners.push(fetchDuffel(creds.duffelKey,origin,dest,d,1).catch(()=>[]));
-      if(apis.includes("Kiwi")) runners.push(fetchKiwi(creds.kiwiKey,origin,dest,d,1).catch(()=>[]));
+      if(apis.includes("SkyScrapper")) runners.push(fetchSkyScrapper(creds.ssKey,origin,dest,d,1).catch(()=>[]));
       const all=(await Promise.all(runners)).flat();
       if(all.length) agg[d]=Math.min(...all.map(f=>f.price));
     }));
@@ -245,7 +229,7 @@ export default function App(){
       <div className="max-w-2xl mx-auto">
         <div className="text-center mb-5">
           <h1 className="text-3xl font-extrabold text-white tracking-tight">✈️ BuscaVoo Pro</h1>
-          <p className="text-blue-300 text-sm mt-1">Agregador multi-API — 3 fontes simultâneas</p>
+          <p className="text-blue-300 text-sm mt-1">Agregador multi-API — 2 fontes simultâneas</p>
           {apis.length>0&&(
             <div className="flex justify-center gap-2 mt-2 flex-wrap">
               {apis.map(a=><span key={a} className={`text-xs font-bold px-2 py-0.5 rounded-full ${srcStyle[a]}`}>{srcIcon[a]} {a}</span>)}
@@ -267,14 +251,13 @@ export default function App(){
         {tab==="config"&&(
           <div className="space-y-3">
             {[
-              {label:"🟣 Duffel",desc:"app.duffel.com → Settings → Access tokens",fields:[{k:"duffelKey",ph:"Duffel Access Token"}]},
-              {label:"🥝 Kiwi (Tequila)",desc:"tequila.kiwi.com",fields:[{k:"kiwiKey",ph:"API Key"}]},
-              {label:"🔭 SkyScrapper",desc:"rapidapi.com → sky-scrapper",fields:[{k:"ssKey",ph:"RapidAPI Key"}]},
+              {label:"🟣 Duffel",desc:"app.duffel.com → Developers → Access tokens",fields:[{k:"duffelKey",ph:"Duffel Access Token"}]},
+              {label:"🔭 SkyScrapper",desc:"rapidapi.com → sky-scrapper → X-RapidAPI-Key",fields:[{k:"ssKey",ph:"RapidAPI Key"}]},
             ].map(({label,desc,fields})=>(
               <div key={label} className="bg-white/10 backdrop-blur rounded-2xl p-4 border border-white/20">
                 <div className="flex justify-between items-start mb-2">
                   <span className="text-white font-bold text-sm">{label}</span>
-                  <span className="text-blue-300 text-xs">{desc}</span>
+                  <span className="text-blue-300 text-xs text-right max-w-[180px]">{desc}</span>
                 </div>
                 {fields.map(({k,ph})=>(
                   <input key={k} type="password" placeholder={ph} value={creds[k]}
@@ -325,7 +308,7 @@ export default function App(){
               </button>
             </div>
             {Object.keys(statuses).length>0&&(
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {Object.entries(statuses).map(([src,st])=>(
                   <div key={src} className={`rounded-xl px-3 py-2 text-xs font-semibold ${srcStyle[src]}`}>
                     {srcIcon[src]} <span className="font-bold">{src}</span><br/><span className="opacity-80">{st}</span>
@@ -425,7 +408,7 @@ export default function App(){
           </div>
         )}
 
-        <p className="text-center text-blue-400/40 text-xs mt-6">Duffel · Kiwi Tequila · SkyScrapper</p>
+        <p className="text-center text-blue-400/40 text-xs mt-6">Duffel · SkyScrapper</p>
       </div>
     </div>
   );
